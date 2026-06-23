@@ -671,11 +671,23 @@ select option{background:var(--surface2);}
   </div>
   <div class="form-row">
     <div class="form-group"><label>Chave XML / NFe</label><input type="text" id="mc-xml" placeholder="E-mail ou chave para envio de NF"></div>
-    <div class="form-group"><label>CEP</label><input type="text" id="mc-cep" placeholder="00000-000"></div>
+    <div class="form-group">
+      <label>CEP</label>
+      <input type="text" id="mc-cep" placeholder="00000-000" maxlength="9" oninput="onCepInput(this)">
+      <div id="cep-status" style="font-size:11px;margin-top:4px;min-height:14px"></div>
+    </div>
   </div>
-  <div class="form-group"><label>Endereço completo</label><input type="text" id="mc-end" placeholder="Rua, número, bairro..."></div>
+  <div class="form-group"><label>Logradouro</label><input type="text" id="mc-logradouro" placeholder="Preenchido automaticamente pelo CEP"></div>
   <div class="form-row">
-    <div class="form-group"><label>Estado / Cidade</label><input type="text" id="mc-cidade" placeholder="SP · Guarulhos"></div>
+    <div class="form-group"><label>Número</label><input type="text" id="mc-numero" placeholder="Ex: 123"></div>
+    <div class="form-group"><label>Complemento</label><input type="text" id="mc-complemento" placeholder="Sala, bloco, referência..."></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group"><label>Bairro</label><input type="text" id="mc-bairro" placeholder="Preenchido automaticamente"></div>
+    <div class="form-group"><label>Cidade</label><input type="text" id="mc-cidade" placeholder="Preenchido automaticamente"></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group" style="max-width:120px"><label>UF</label><input type="text" id="mc-uf" placeholder="SP" maxlength="2" style="text-transform:uppercase"></div>
     <div class="form-group"><label>Telefone / WhatsApp</label><input type="text" id="mc-tel" placeholder="(11) 9 0000-0000" oninput="previewWA()"></div>
   </div>
 
@@ -860,11 +872,11 @@ const MNAMES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','A
 // ======================================================
 let S = {
   clientes:[
-    {id:'marsil',nome:'Marsil',fantasia:'Marsil',comprador:'Rafael',rep:'',comissao:3,desconto:0,prazo:28,cnpj:'',ie:'',xml:'',cep:'',end:'',cidade:'',tel:'',obs:''},
-    {id:'aveloz',nome:'Aveloz',fantasia:'Aveloz',comprador:'Dalmo',rep:'',comissao:1,desconto:0,prazo:28,cnpj:'',ie:'',xml:'',cep:'',end:'',cidade:'',tel:'',obs:''},
-    {id:'tateno',nome:'Tateno',fantasia:'Tateno',comprador:'Miguel',rep:'',comissao:3,desconto:0,prazo:28,cnpj:'',ie:'',xml:'',cep:'',end:'',cidade:'',tel:'',obs:''},
-    {id:'big-preco',nome:'Big Preço',fantasia:'Big Preço',comprador:'Chicão',rep:'',comissao:1,desconto:0,prazo:28,cnpj:'',ie:'',xml:'',cep:'',end:'',cidade:'',tel:'',obs:''},
-    {id:'assai',nome:'Assaí',fantasia:'Assaí',comprador:'Dayane',rep:'',comissao:3,desconto:0,prazo:28,cnpj:'',ie:'',xml:'',cep:'',end:'',cidade:'',tel:'',obs:''},
+    {id:'marsil',nome:'Marsil',fantasia:'Marsil',comprador:'Rafael',rep:'',comissao:3,desconto:0,prazo:28,cnpj:'',ie:'',xml:'',cep:'',logradouro:'',numero:'',complemento:'',bairro:'',cidade:'',uf:'',tel:'',obs:''},
+    {id:'aveloz',nome:'Aveloz',fantasia:'Aveloz',comprador:'Dalmo',rep:'',comissao:1,desconto:0,prazo:28,cnpj:'',ie:'',xml:'',cep:'',logradouro:'',numero:'',complemento:'',bairro:'',cidade:'',uf:'',tel:'',obs:''},
+    {id:'tateno',nome:'Tateno',fantasia:'Tateno',comprador:'Miguel',rep:'',comissao:3,desconto:0,prazo:28,cnpj:'',ie:'',xml:'',cep:'',logradouro:'',numero:'',complemento:'',bairro:'',cidade:'',uf:'',tel:'',obs:''},
+    {id:'big-preco',nome:'Big Preço',fantasia:'Big Preço',comprador:'Chicão',rep:'',comissao:1,desconto:0,prazo:28,cnpj:'',ie:'',xml:'',cep:'',logradouro:'',numero:'',complemento:'',bairro:'',cidade:'',uf:'',tel:'',obs:''},
+    {id:'assai',nome:'Assaí',fantasia:'Assaí',comprador:'Dayane',rep:'',comissao:3,desconto:0,prazo:28,cnpj:'',ie:'',xml:'',cep:'',logradouro:'',numero:'',complemento:'',bairro:'',cidade:'',uf:'',tel:'',obs:''},
   ],
   pedidos:[],entregas:[],visitas:[],comissoes:[],
   selProds:{},
@@ -1927,6 +1939,52 @@ function delVis(id){if(confirm('Excluir visita?')){S.visitas=S.visitas.filter(v=
 // ======================================================
 // CLIENTES
 // ======================================================
+// ======================================================
+// BUSCA DE CEP (ViaCEP)
+// ======================================================
+let _cepDebounce=null;
+function onCepInput(el){
+  // mascara 00000-000
+  let v=el.value.replace(/\D/g,'').slice(0,8);
+  if(v.length>5) v=v.slice(0,5)+'-'+v.slice(5);
+  el.value=v;
+
+  const statusEl=document.getElementById('cep-status');
+  clearTimeout(_cepDebounce);
+  const digits=v.replace(/\D/g,'');
+  if(digits.length<8){
+    statusEl.textContent='';
+    return;
+  }
+  statusEl.textContent='Buscando endereço...';
+  statusEl.style.color='var(--text3)';
+  _cepDebounce=setTimeout(()=>buscarCEP(digits),300);
+}
+
+async function buscarCEP(cep){
+  const statusEl=document.getElementById('cep-status');
+  try{
+    const res=await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+    const data=await res.json();
+    if(data.erro){
+      statusEl.textContent='⚠ CEP não encontrado. Preencha o endereço manualmente.';
+      statusEl.style.color='var(--orange)';
+      return;
+    }
+    document.getElementById('mc-logradouro').value=data.logradouro||'';
+    document.getElementById('mc-bairro').value=data.bairro||'';
+    document.getElementById('mc-cidade').value=data.localidade||'';
+    document.getElementById('mc-uf').value=data.uf||'';
+    statusEl.textContent='✓ Endereço encontrado — complete número e complemento';
+    statusEl.style.color='var(--green)';
+    const numEl=document.getElementById('mc-numero');
+    if(numEl){numEl.focus();}
+  }catch(err){
+    statusEl.textContent='⚠ Erro ao buscar CEP. Verifique sua conexão.';
+    statusEl.style.color='var(--red)';
+  }
+}
+
 function previewWA(){
   const tel=document.getElementById('mc-tel').value.replace(/\D/g,'');
   const wrap=document.getElementById('wa-preview');
@@ -1951,8 +2009,13 @@ function openModalCliente(id=null){
   document.getElementById('mc-ie').value=c?c.ie||'':'';
   document.getElementById('mc-xml').value=c?c.xml||'':'';
   document.getElementById('mc-cep').value=c?c.cep||'':'';
-  document.getElementById('mc-end').value=c?c.end||'':'';
+  document.getElementById('mc-logradouro').value=c?c.logradouro||c.end||'':'';
+  document.getElementById('mc-numero').value=c?c.numero||'':'';
+  document.getElementById('mc-complemento').value=c?c.complemento||'':'';
+  document.getElementById('mc-bairro').value=c?c.bairro||'':'';
   document.getElementById('mc-cidade').value=c?c.cidade||'':'';
+  document.getElementById('mc-uf').value=c?c.uf||'':'';
+  document.getElementById('cep-status').textContent='';
   document.getElementById('mc-tel').value=c?c.tel||'':'';
   document.getElementById('mc-comp').value=c?c.comprador:'';
   document.getElementById('mc-rep').value=c?c.rep||'':'';
@@ -1989,8 +2052,12 @@ function saveCliente(){
     ie:document.getElementById('mc-ie').value,
     xml:document.getElementById('mc-xml').value,
     cep:document.getElementById('mc-cep').value,
-    end:document.getElementById('mc-end').value,
+    logradouro:document.getElementById('mc-logradouro').value,
+    numero:document.getElementById('mc-numero').value,
+    complemento:document.getElementById('mc-complemento').value,
+    bairro:document.getElementById('mc-bairro').value,
     cidade:document.getElementById('mc-cidade').value,
+    uf:document.getElementById('mc-uf').value,
     tel:document.getElementById('mc-tel').value,
     obs:document.getElementById('mc-obs').value,
   };
@@ -2034,7 +2101,7 @@ function renderClientes(){
         ${c.cnpj?`<div>📄 CNPJ: <strong>${c.cnpj}</strong></div>`:''}
         ${c.ie?`<div>🏷 IE: ${c.ie}</div>`:''}
         ${c.xml?`<div>📧 XML: ${c.xml}</div>`:''}
-        ${c.end?`<div>📍 ${c.end}${c.cidade?', '+c.cidade:''}${c.cep?' — '+c.cep:''}</div>`:''}
+        ${(c.logradouro||c.end)?`<div>📍 ${c.logradouro||c.end}${c.numero?', '+c.numero:''}${c.complemento?' - '+c.complemento:''}${c.bairro?' · '+c.bairro:''}<br>${c.cidade?c.cidade:''}${c.uf?'/'+c.uf:''}${c.cep?' — '+c.cep:''}</div>`:''}
         ${c.tel?`<div>📞 ${c.tel}</div>`:''}
       </div>
 
