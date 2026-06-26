@@ -401,9 +401,10 @@ select option{background:var(--surface2);}
 <!-- ===== MODAL PEDIDO ===== -->
 <div class="modal-overlay hidden" id="modal-pedido">
 <div class="modal modal-lg">
+  <input type="hidden" id="ped-edit-id">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
-    <h3 style="margin:0">📦 Novo Pedido</h3>
-    <label style="display:inline-flex;align-items:center;gap:7px;padding:8px 14px;background:rgba(110,140,160,.12);border:1px solid rgba(110,140,160,.3);border-radius:8px;color:var(--blue);font-size:12px;font-weight:600;cursor:pointer;transition:background .2s" onmouseover="this.style.background='rgba(110,140,160,.22)'" onmouseout="this.style.background='rgba(110,140,160,.12)'">
+    <h3 style="margin:0" id="modal-pedido-title">📦 Novo Pedido</h3>
+    <label id="ped-import-label" style="display:inline-flex;align-items:center;gap:7px;padding:8px 14px;background:rgba(110,140,160,.12);border:1px solid rgba(110,140,160,.3);border-radius:8px;color:var(--blue);font-size:12px;font-weight:600;cursor:pointer;transition:background .2s" onmouseover="this.style.background='rgba(110,140,160,.22)'" onmouseout="this.style.background='rgba(110,140,160,.12)'">
       📄 Importar PDF do cliente
       <input type="file" accept=".pdf" style="display:none" onchange="importarPedidoPDF(this)">
     </label>
@@ -414,6 +415,7 @@ select option{background:var(--surface2);}
     <div class="form-group">
       <label>Cliente</label>
       <select id="ped-cli" onchange="onCliPed()"><option value="">Selecionar...</option></select>
+      <div id="ped-cli-locked-msg" style="display:none;font-size:11px;color:var(--text3);margin-top:4px">🔒 Cliente não pode ser alterado após criação do pedido</div>
     </div>
     <div class="form-group">
       <label>Comprador</label>
@@ -474,6 +476,9 @@ select option{background:var(--surface2);}
       <span style="font-size:11px;color:var(--text3)" id="item-count">0 itens</span>
     </div>
 
+    <div id="ped-edit-notice" style="display:none;margin-bottom:10px;padding:9px 12px;background:rgba(110,140,160,.1);border:1px solid rgba(110,140,160,.25);border-radius:8px;font-size:12px;color:var(--blue)">
+      ℹ️ Itens já agendados ou entregues não podem ter a quantidade reduzida abaixo do que já foi movimentado, nem ser removidos. Cancele o agendamento primeiro se precisar.
+    </div>
     <!-- Tabela de itens -->
     <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:10px">
       <table style="width:100%;border-collapse:collapse">
@@ -512,7 +517,7 @@ select option{background:var(--surface2);}
   <div class="modal-actions">
     <button class="btn btn-ghost" onclick="closeM('modal-pedido')">Cancelar</button>
     <button class="btn btn-green" onclick="exportPedidoExcel()" id="btn-export-excel" style="display:none">📊 Exportar Excel</button>
-    <button class="btn btn-primary" onclick="savePedido()">Salvar Pedido</button>
+    <button class="btn btn-primary" onclick="saveOrUpdatePedido()" id="btn-save-pedido">Salvar Pedido</button>
   </div>
 </div>
 </div>
@@ -1114,7 +1119,7 @@ function addProdByCod(){
     // já existe: soma a qtd
     S.selProds[p.code].qty+=qty;
   } else {
-    S.selProds[p.code]={...p,qty};
+    S.selProds[p.code]={...p,qty,_minQty:0};
   }
 
   // limpa e volta o foco pro campo de código
@@ -1127,13 +1132,25 @@ function addProdByCod(){
 }
 
 function removeItem(code){
+  const item=S.selProds[code];
+  if(item&&item._minQty>0){
+    alert('Este item já tem caixas agendadas ou entregues e não pode ser removido. Cancele o agendamento primeiro, se necessário.');
+    return;
+  }
   delete S.selProds[code];
   calcTotals();
 }
 
 function updateItemQty(code, val){
-  const qty=Math.max(1,parseInt(val)||1);
-  if(S.selProds[code]) S.selProds[code].qty=qty;
+  const item=S.selProds[code];
+  if(!item)return;
+  const floor=item._minQty||0;
+  let qty=Math.max(1,parseInt(val)||1);
+  if(qty<floor){
+    alert(`Este item já tem ${floor}cx agendadas/entregues. A quantidade não pode ser menor que isso.`);
+    qty=floor;
+  }
+  item.qty=qty;
   calcTotals();
 }
 
@@ -1153,21 +1170,23 @@ function calcTotals(){
     const kg=(p.kg||0)*p.qty;
     const m3=(p.m3||0)*p.qty;
     tab+=sub; totalCx+=p.qty; totalKg+=kg; totalM3+=m3;
+    const floor=p._minQty||0;
+    const locked=floor>0;
     return`<tr style="border-top:1px solid var(--border)">
       <td style="padding:8px 12px;font-size:12px;font-weight:600;color:var(--text3)">${p.code}</td>
       <td style="padding:8px 12px;font-size:13px">
         <div style="font-weight:500">${p.name}</div>
-        <div style="font-size:10px;color:var(--text3)">${p.cat}</div>
+        <div style="font-size:10px;color:var(--text3)">${p.cat}${locked?` · <span style="color:var(--blue)">mín. ${floor}cx</span>`:''}</div>
       </td>
       <td style="padding:8px 12px;text-align:right">
-        <input type="number" value="${p.qty}" min="1" onchange="updateItemQty(${p.code},this.value)"
+        <input type="number" value="${p.qty}" min="${floor||1}" onchange="updateItemQty(${p.code},this.value)"
           style="width:62px;text-align:center;padding:4px 6px;background:var(--surface3);border:1px solid var(--border);color:var(--text);border-radius:6px;font-family:Plus Jakarta Sans,sans-serif;font-size:13px;">
       </td>
       <td style="padding:8px 12px;text-align:right;font-size:13px">${fmt(p.pl)}</td>
       <td style="padding:8px 12px;text-align:right;font-size:13px;font-weight:600">${fmt(sub)}</td>
       <td style="padding:8px 12px;text-align:right;font-size:12px;color:var(--text2)">${(kg).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       <td style="padding:8px 4px;text-align:center">
-        <button onclick="removeItem(${p.code})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 4px;border-radius:4px" title="Remover">✕</button>
+        ${locked?`<span style="color:var(--text3);font-size:12px" title="Possui caixas agendadas/entregues">🔒</span>`:`<button onclick="removeItem(${p.code})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 4px;border-radius:4px" title="Remover">✕</button>`}
       </td>
     </tr>`;
   }).join('');
@@ -1205,6 +1224,13 @@ function onCliVis(){
 // ======================================================
 function openModalPedido(){
   S.selProds={};
+  document.getElementById('ped-edit-id').value='';
+  document.getElementById('modal-pedido-title').textContent='📦 Novo Pedido';
+  document.getElementById('btn-save-pedido').textContent='Salvar Pedido';
+  document.getElementById('ped-edit-notice').style.display='none';
+  document.getElementById('ped-cli-locked-msg').style.display='none';
+  document.getElementById('ped-import-label').style.display='inline-flex';
+  document.getElementById('ped-cli').disabled=false;
   populateCliSelects();
   document.getElementById('ped-cli').value='';
   document.getElementById('ped-comp').value='';
@@ -1219,6 +1245,85 @@ function openModalPedido(){
   document.getElementById('btn-export-excel').style.display='none';
   openM('modal-pedido');
   setTimeout(()=>document.getElementById('cod-input').focus(),100);
+}
+
+function openModalEditPedido(id){
+  const ped=S.pedidos.find(p=>p.id===id);
+  if(!ped)return;
+  populateCliSelects();
+
+  // monta S.selProds a partir dos itens existentes, com piso = max(agendado, entregue)
+  S.selProds={};
+  ped.items.forEach(i=>{
+    const floor=Math.max(i.agendado||0,i.entregue||0);
+    S.selProds[i.code]={code:i.code,name:i.name,cat:i.cat,pl:i.pl,kg:i.kg||0,m3:i.m3||0,qty:i.qty,_minQty:floor};
+  });
+
+  document.getElementById('ped-edit-id').value=id;
+  document.getElementById('modal-pedido-title').textContent=`✏️ Editar Pedido ${ped.num}`;
+  document.getElementById('btn-save-pedido').textContent='Salvar Alterações';
+  document.getElementById('ped-edit-notice').style.display='block';
+  document.getElementById('ped-cli-locked-msg').style.display='block';
+  document.getElementById('ped-import-label').style.display='none';
+
+  document.getElementById('ped-cli').value=ped.cliente;
+  document.getElementById('ped-cli').disabled=true;
+  document.getElementById('ped-comp').value=ped.comprador||'';
+  document.getElementById('ped-data').value=ped.data;
+  document.getElementById('ped-obs').value=ped.obs||'';
+  document.getElementById('ped-desc').value=ped.descPct||0;
+  document.getElementById('cod-input').value='';
+  document.getElementById('qty-input').value=1;
+  document.getElementById('prod-preview').innerHTML='<span style="color:var(--text3);font-size:13px">Digite o código do produto...</span>';
+  document.getElementById('cod-err').style.display='none';
+
+  openM('modal-pedido');
+  calcTotals();
+  setTimeout(()=>document.getElementById('cod-input').focus(),100);
+}
+
+function saveOrUpdatePedido(){
+  const editId=document.getElementById('ped-edit-id').value;
+  if(editId) updatePedido(editId);
+  else savePedido();
+}
+
+function updatePedido(id){
+  const ped=S.pedidos.find(p=>p.id===id);
+  if(!ped)return;
+  const items=Object.values(S.selProds);
+  if(!items.length){alert('O pedido precisa ter ao menos um produto.');return;}
+
+  const data=document.getElementById('ped-data').value;
+  const desc=parseFloat(document.getElementById('ped-desc').value)||0;
+  const tabTotal=items.reduce((s,p)=>s+p.pl*(p.qty||1),0);
+  const discVal=tabTotal*(desc/100);
+  const final=tabTotal-discVal;
+  const totalCx=items.reduce((s,p)=>s+p.qty,0);
+  const totalKg=items.reduce((s,p)=>s+(p.kg||0)*p.qty,0);
+  const totalM3=items.reduce((s,p)=>s+(p.m3||0)*p.qty,0);
+
+  ped.data=data;
+  ped.obs=document.getElementById('ped-obs').value;
+  ped.descPct=desc;
+  ped.tabTotal=tabTotal; ped.discVal=discVal; ped.final=final;
+  ped.totalCx=totalCx; ped.totalKg=totalKg; ped.totalM3=totalM3;
+  // preserva agendado/entregue de cada item, atualizando qty/dados de catálogo
+  ped.items=items.map(p=>{
+    const existing=ped.items.find(i=>i.code===p.code);
+    return{
+      code:p.code,name:p.name,cat:p.cat,pl:p.pl,kg:p.kg||0,m3:p.m3||0,
+      qty:p.qty,
+      agendado:existing?existing.agendado||0:0,
+      entregue:existing?existing.entregue||0:0,
+    };
+  });
+  // recalcula status com base no novo total
+  const ent=ped.items.reduce((s,i)=>s+i.entregue,0);
+  const ag=ped.items.reduce((s,i)=>s+(i.agendado||0),0);
+  ped.status=ent>=totalCx?'entregue':(ent>0||ag>0)?'parcial':'pendente';
+
+  save();closeM('modal-pedido');renderPedidos();
 }
 
 function savePedido(){
@@ -1341,6 +1446,7 @@ function renderPedidos(){
         ${sb}
         <div style="display:flex;gap:4px;margin-top:5px;flex-wrap:wrap">
           <button class="btn btn-sm btn-green" onclick="openAgendamento('${p.id}')">📅 Agendar</button>
+          <button class="btn btn-sm" style="background:rgba(110,140,160,.12);color:var(--blue);border:1px solid rgba(110,140,160,.25)" onclick="openModalEditPedido('${p.id}')" title="Editar pedido">✏️ Editar</button>
           <button class="btn btn-sm btn-ghost" onclick="exportPedidoById('${p.id}')" title="Exportar Excel">📊</button>
           <button class="btn btn-sm btn-danger" onclick="delPed('${p.id}')">🗑</button>
         </div>
