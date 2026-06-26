@@ -1362,11 +1362,10 @@ function exportPedidoExcel(){
   const nome=document.getElementById('ped-cli').value;
   const items=Object.values(S.selProds);
   if(!nome||!items.length){alert('Preencha cliente e produtos primeiro.');return;}
-  const cli=getCli(nome);
   const desc=parseFloat(document.getElementById('ped-desc').value)||0;
   const data=document.getElementById('ped-data').value;
   const obs=document.getElementById('ped-obs').value;
-  _doExport({cliente:nome,comprador:cli?cli.comprador:'',data,obs,descPct:desc,items});
+  _doExport({num:'(novo)',cliente:nome,data,obs,descPct:desc,items});
 }
 function exportPedidoById(id){
   const ped=S.pedidos.find(p=>p.id===id);
@@ -1376,41 +1375,58 @@ function exportPedidoById(id){
 function _doExport(ped){
   const wb=XLSX.utils.book_new();
   const desc=ped.descPct||0;
+  const cli=getCli(ped.cliente)||{};
+  const fantasia=cli.fantasia||ped.cliente;
+  const endereco=[cli.logradouro,cli.numero].filter(Boolean).join(', ')+(cli.complemento?' - '+cli.complemento:'')+(cli.bairro?' · '+cli.bairro:'');
+  const esCidade=[cli.cidade,cli.uf].filter(Boolean).join('/');
 
-  // Header rows
+  // ===== Cabeçalho no padrão oficial Santa Fé =====
   const rows=[
-    ['SANTA FÉ BALAS E DOCES','','','','','',''],
-    ['GESTÃO COMERCIAL - TABELA 05/2026','','','','','',''],
+    ['SANTA FÉ BALAS E DOCES','','','','',''],
+    ['PEDIDO Nº '+(ped.num||'')+(ped.obs?'   ·   PEDIDO CLIENTE: '+ped.obs:''),'','','','',''],
     [''],
-    ['CLIENTE:',ped.cliente,'','COMPRADOR:',ped.comprador,'',''],
-    ['DATA:',ped.data,'','OBS:',ped.obs||'','',''],
-    ['DESCONTO:',desc+'%','','','','',''],
+    ['R.SOCIAL :',cli.nome||ped.cliente,'','COD. CLIENTE :',cli.id||'',''],
+    ['NOME FANTASIA :',fantasia,'','INSC.ES. :',cli.ie||'',''],
+    ['CNPJ:',cli.cnpj||'','','FONE :',cli.tel||'',''],
+    ['XML:',cli.xml||'','','CEP :',cli.cep||'',''],
+    ['ENDEREÇO:',endereco||'','','DATA:',fd(ped.data),''],
+    ['ES.CIDADE:',esCidade||'','','COMISSÃO:',(cli.comissao!==undefined?cli.comissao+'%':''),''],
+    ['REPRESENT:',cli.rep||'','','PRAZO:',(cli.prazo!==undefined?cli.prazo+' dias':''),''],
+    ['COMPRADOR:',ped.comprador||cli.comprador||'','','DESCONTO:',desc+'%',''],
     [''],
-    ['CÓD.','PRODUTO','CATEGORIA','QTD (cx)','VLR. UNIT. (R$)','SUBTOTAL (R$)','SUBTOTAL C/ DESC (R$)'],
+    ['CÓDIGO','DESCRIÇÃO','CATEGORIA','VALOR QUILO','VALOR CAIXA','QUANTIDADE (CX)','VALOR TOTAL','PESO LÍQ. UNIT (KG)','PESO LÍQ. TOTAL (KG)','CUBAGEM UNIT (M³)','CUBAGEM TOTAL (M³)'],
   ];
 
-  let tabTotal=0;
+  let tabTotal=0,totalKg=0,totalM3=0;
   const items=ped.items||Object.values(ped.selProds||{});
   items.forEach(p=>{
-    const sub=p.pl*(p.qty||1);
-    const subDesc=sub*(1-desc/100);
-    tabTotal+=sub;
-    rows.push([p.code,p.name,p.cat,p.qty||1,p.pl,sub,subDesc]);
+    const qty=p.qty||1;
+    const sub=p.pl*qty;
+    const kgUnit=p.kg||0;
+    const m3Unit=p.m3||0;
+    const valorQuilo=kgUnit>0?p.pl/kgUnit:0;
+    tabTotal+=sub; totalKg+=kgUnit*qty; totalM3+=m3Unit*qty;
+    rows.push([p.code,p.name,p.cat,valorQuilo?Number(valorQuilo.toFixed(2)):'',p.pl,qty,sub,kgUnit,Number((kgUnit*qty).toFixed(3)),m3Unit,Number((m3Unit*qty).toFixed(5))]);
   });
 
+  const discVal=tabTotal*(desc/100);
   rows.push(['']);
-  rows.push(['','','','','TOTAL TABELA:',tabTotal,'']);
-  rows.push(['','','','','DESCONTO ('+desc+'%):',tabTotal*(desc/100),'']);
-  rows.push(['','','','','TOTAL FINAL:',tabTotal*(1-desc/100),'']);
+  rows.push(['','','','','','','TOTAL CAIXAS:',items.reduce((s,p)=>s+(p.qty||1),0),'','','']);
+  rows.push(['','','','','','','PESO TOTAL (KG):',Number(totalKg.toFixed(2)),'','','']);
+  rows.push(['','','','','','','CUBAGEM TOTAL (M³):',Number(totalM3.toFixed(3)),'','','']);
+  rows.push(['']);
+  rows.push(['','','','','','','VALOR TABELA:',tabTotal,'','','']);
+  rows.push(['','','','','','','DESCONTO ('+desc+'%):',Number(discVal.toFixed(2)),'','','']);
+  rows.push(['','','','','','','VALOR FINAL:',Number((tabTotal-discVal).toFixed(2)),'','','']);
 
   const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[{wch:10},{wch:30},{wch:32},{wch:10},{wch:16},{wch:16},{wch:18}];
+  ws['!cols']=[{wch:10},{wch:28},{wch:26},{wch:13},{wch:13},{wch:15},{wch:14},{wch:15},{wch:15},{wch:14},{wch:15}];
   ws['!merges']=[
-    {s:{r:0,c:0},e:{r:0,c:6}},
-    {s:{r:1,c:0},e:{r:1,c:6}},
+    {s:{r:0,c:0},e:{r:0,c:10}},
+    {s:{r:1,c:0},e:{r:1,c:10}},
   ];
   XLSX.utils.book_append_sheet(wb,ws,'Pedido');
-  const fname=`Pedido_${ped.cliente.replace(/\s/g,'_')}_${(ped.data||new Date().toISOString().slice(0,10)).replace(/-/g,'')}.xlsx`;
+  const fname=`Pedido_${(ped.num||'novo').replace(/\s/g,'_')}_${fantasia.replace(/\s/g,'_')}_${(ped.data||new Date().toISOString().slice(0,10)).replace(/-/g,'')}.xlsx`;
   XLSX.writeFile(wb,fname);
 }
 
@@ -1606,7 +1622,46 @@ function buildAgRows(p, page){
   const entregue=p.items.reduce((s,i)=>s+i.entregue,0);
   const saldo=tot-agendado;
   const ags=S.entregas.filter(e=>e.pedidoId===p.id).sort((a,b)=>a.data.localeCompare(b.data)||a.hora.localeCompare(b.hora));
-  return`<div style="padding:16px 20px">
+
+  const totalKg=p.items.reduce((s,i)=>s+(i.kg||0)*i.qty,0);
+  const totalM3=p.items.reduce((s,i)=>s+(i.m3||0)*i.qty,0);
+  const itensResumo=`<div style="padding:16px 20px;border-bottom:1px solid var(--border)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);font-weight:600">Itens do Pedido — ${p.num} · ${fantasia}</span>
+      <button class="btn btn-sm btn-ghost" onclick="exportPedidoById('${p.id}')">📊 Exportar Excel</button>
+    </div>
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:var(--surface3)">
+        <th style="padding:7px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-weight:600">Código</th>
+        <th style="padding:7px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-weight:600">Produto</th>
+        <th style="padding:7px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-weight:600">Categoria</th>
+        <th style="padding:7px 12px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-weight:600">Qtd (cx)</th>
+        <th style="padding:7px 12px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-weight:600">Vl. Unit.</th>
+        <th style="padding:7px 12px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-weight:600">Subtotal</th>
+        <th style="padding:7px 12px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-weight:600">Peso (kg)</th>
+      </tr></thead>
+      <tbody>
+        ${p.items.map(i=>`<tr style="border-top:1px solid var(--border)">
+          <td style="padding:7px 12px;font-size:12px;font-weight:600;color:var(--text3)">${i.code}</td>
+          <td style="padding:7px 12px;font-size:13px">${i.name}</td>
+          <td style="padding:7px 12px;font-size:11px;color:var(--text3)">${i.cat}</td>
+          <td style="padding:7px 12px;text-align:right;font-size:13px">${i.qty}</td>
+          <td style="padding:7px 12px;text-align:right;font-size:13px">${fmt(i.pl)}</td>
+          <td style="padding:7px 12px;text-align:right;font-size:13px;font-weight:600">${fmt(i.pl*i.qty)}</td>
+          <td style="padding:7px 12px;text-align:right;font-size:12px;color:var(--text2)">${((i.kg||0)*i.qty).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    <div style="display:flex;justify-content:flex-end;gap:24px;margin-top:12px;font-size:13px;flex-wrap:wrap">
+      <span style="color:var(--text2)">Peso total: <strong style="color:var(--text)">${totalKg.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})} kg</strong></span>
+      <span style="color:var(--text2)">Cubagem: <strong style="color:var(--text)">${totalM3.toLocaleString('pt-BR',{minimumFractionDigits:3,maximumFractionDigits:3})} m³</strong></span>
+      <span style="color:var(--text2)">Vlr. tabela: <strong style="color:var(--text)">${fmt(p.tabTotal)}</strong></span>
+      <span style="color:var(--text2)">Desconto (${p.descPct||0}%): <strong style="color:var(--red)">- ${fmt(p.discVal||0)}</strong></span>
+      <span>Vlr. final: <strong class="ca" style="font-size:15px">${fmt(p.final||p.tabTotal)}</strong></span>
+    </div>
+  </div>`;
+
+  return itensResumo+`<div style="padding:16px 20px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
       <div>
         <span style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);font-weight:600">Agendamentos — ${p.num} · ${fantasia}</span>
