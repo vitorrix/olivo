@@ -193,6 +193,7 @@ select option{background:var(--surface2);}
 .agenda-day .dn{font-size:11px;font-weight:600;color:var(--text2);margin-bottom:3px;}
 .agenda-day.today .dn{color:var(--accent);}
 .visit-chip{font-size:10px;padding:2px 5px;border-radius:3px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.visit-chip-done{font-size:10px;padding:2px 5px;border-radius:3px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:rgba(193,135,90,.18)!important;color:var(--accent)!important;text-decoration:line-through;opacity:.8;}
 .vc-marsil{background:rgba(124,154,92,.15);color:var(--green);}
 .vc-aveloz{background:rgba(110,140,160,.15);color:var(--blue);}
 .vc-tateno{background:rgba(187,139,62,.15);color:var(--orange);}
@@ -379,11 +380,38 @@ select option{background:var(--surface2);}
   <div class="agenda-grid" id="ag-headers"></div>
   <div style="height:6px"></div>
   <div class="agenda-grid" id="ag-cal"></div>
+
+  <!-- Legenda visual -->
+  <div style="display:flex;gap:16px;align-items:center;margin:12px 0 4px;flex-wrap:wrap">
+    <span style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;font-weight:600">Legenda:</span>
+    <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2)">
+      <span style="width:10px;height:10px;border-radius:50%;background:var(--olive);display:inline-block"></span>Agendada
+    </span>
+    <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2)">
+      <span style="width:10px;height:10px;border-radius:50%;background:var(--accent);display:inline-block"></span>Realizada
+    </span>
+  </div>
+
   <div class="section-divider"></div>
+
+  <!-- Próximas visitas -->
   <div style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;font-weight:600">Próximas visitas</div>
   <div class="table-wrap">
     <table><thead><tr><th>Data / Hora</th><th>Cliente</th><th>Comprador</th><th>Objetivo</th><th>Ações</th></tr></thead>
     <tbody id="tag"></tbody></table>
+  </div>
+
+  <!-- Visitas concluídas -->
+  <div id="section-concluidas" style="display:none">
+    <div class="section-divider"></div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;font-weight:600">Visitas realizadas</span>
+      <span id="conc-count" style="font-size:11px;background:rgba(193,135,90,.15);color:var(--accent);padding:2px 8px;border-radius:10px;font-weight:600"></span>
+    </div>
+    <div class="table-wrap">
+      <table><thead><tr><th>Data / Hora</th><th>Cliente</th><th>Comprador</th><th>Objetivo</th><th>Ações</th></tr></thead>
+      <tbody id="tag-concluidas"></tbody></table>
+    </div>
   </div>
 </div>
 
@@ -2124,17 +2152,19 @@ function renderAgenda(){
     const dv=S.visitas.filter(v=>v.data===ds);
     c+=`<div class="agenda-day${ds===today?' today':''}" onclick="openModalVisita('${ds}')">
       <div class="dn">${d}</div>
-      ${dv.slice(0,3).map(v=>`<div class="visit-chip ${vcClass(v.cliente)}">${v.hora} ${getFantasia(v.cliente)}</div>`).join('')}
+      ${dv.slice(0,3).map(v=>`<div class="${v.status==='realizado'?'visit-chip-done':'visit-chip '+vcClass(v.cliente)}">${v.hora} ${getFantasia(v.cliente)}</div>`).join('')}
       ${dv.length>3?`<div style="font-size:10px;color:var(--text3)">+${dv.length-3}</div>`:''}
     </div>`;
   }
   const rem=(7-(first+dim)%7)%7;
   for(let i=1;i<=rem;i++){c+=`<div class="agenda-day other-month"><div class="dn">${i}</div></div>`;}
   document.getElementById('ag-cal').innerHTML=c;
-  const up=S.visitas.filter(v=>v.data>=today).sort((a,b)=>a.data.localeCompare(b.data)||a.hora.localeCompare(b.hora));
+
+  // Próximas visitas (agendadas, data >= hoje)
+  const up=S.visitas.filter(v=>v.status!=='realizado'&&v.data>=today).sort((a,b)=>a.data.localeCompare(b.data)||a.hora.localeCompare(b.hora));
   const el=document.getElementById('tag');
-  if(!up.length){el.innerHTML='<tr><td colspan="5"><div class="empty-state"><div class="big">📅</div><p>Nenhuma visita agendada</p></div></td></tr>';return;}
-  el.innerHTML=up.map(v=>`<tr>
+  if(!up.length){el.innerHTML='<tr><td colspan="5"><div class="empty-state"><div class="big">📅</div><p>Nenhuma visita agendada</p></div></td></tr>';}
+  else el.innerHTML=up.map(v=>`<tr>
     <td class="fw6">${fd(v.data)} <span class="tm">${v.hora}</span></td>
     <td><span class="client-dot ${dotClass(v.cliente)}"></span>${getFantasia(v.cliente)}</td>
     <td>${v.comprador}</td>
@@ -2144,8 +2174,36 @@ function renderAgenda(){
       <button class="btn btn-sm btn-danger" onclick="delVis('${v.id}')" style="margin-left:4px">🗑</button>
     </td>
   </tr>`).join('');
+
+  // Visitas realizadas
+  const done=S.visitas.filter(v=>v.status==='realizado').sort((a,b)=>b.data.localeCompare(a.data)||b.hora.localeCompare(a.hora));
+  const secDone=document.getElementById('section-concluidas');
+  if(!done.length){secDone.style.display='none';return;}
+  secDone.style.display='block';
+  document.getElementById('conc-count').textContent=done.length+' realizada'+(done.length!==1?'s':'');
+  document.getElementById('tag-concluidas').innerHTML=done.map(v=>`<tr style="opacity:.75">
+    <td class="fw6" style="color:var(--text2)">${fd(v.data)} <span class="tm">${v.hora}</span></td>
+    <td><span class="client-dot ${dotClass(v.cliente)}"></span>${getFantasia(v.cliente)}</td>
+    <td style="color:var(--text2)">${v.comprador}</td>
+    <td style="color:var(--text2)">${v.objetivo||'—'}</td>
+    <td>
+      <button class="btn btn-sm" style="background:rgba(193,135,90,.12);color:var(--accent);border:1px solid rgba(193,135,90,.25)" onclick="desfazVis('${v.id}')" title="Desfazer">↩ Desfazer</button>
+      <button class="btn btn-sm btn-danger" onclick="delVis('${v.id}')" style="margin-left:4px">🗑</button>
+    </td>
+  </tr>`).join('');
 }
-function rmVis(id){S.visitas=S.visitas.filter(v=>v.id!==id);save();renderAgenda();}
+function rmVis(id){
+  const v=S.visitas.find(x=>x.id===id);
+  if(!v)return;
+  v.status='realizado';
+  save();renderAgenda();
+}
+function desfazVis(id){
+  const v=S.visitas.find(x=>x.id===id);
+  if(!v)return;
+  v.status='agendado';
+  save();renderAgenda();
+}
 function delVis(id){if(confirm('Excluir visita?')){S.visitas=S.visitas.filter(v=>v.id!==id);save();renderAgenda();}}
 
 // ======================================================
