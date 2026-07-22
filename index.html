@@ -515,7 +515,8 @@ select option{background:var(--surface2);}
             <th style="padding:8px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-weight:600">Código</th>
             <th style="padding:8px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-weight:600">Produto</th>
             <th style="padding:8px 12px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-weight:600">Qtd</th>
-            <th style="padding:8px 12px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-weight:600">Vl. Unit.</th>
+            <th style="padding:8px 12px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-weight:600">Vl. Tabela</th>
+            <th id="th-neg" style="padding:8px 12px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--accent);font-weight:600">Vl. Negociado</th>
             <th style="padding:8px 12px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-weight:600">Subtotal</th>
             <th style="padding:8px 12px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-weight:600">Peso (kg)</th>
             <th style="padding:8px 4px;width:32px"></th>
@@ -1182,6 +1183,20 @@ function updateItemQty(code, val){
   calcTotals();
 }
 
+function updateItemPrice(code, val){
+  const item=S.selProds[code];
+  if(!item)return;
+  const desc=parseFloat(document.getElementById('ped-desc').value)||0;
+  if(desc>0){
+    alert('Não é possível definir um preço negociado com desconto ativo. Zere o desconto primeiro.');
+    calcTotals(); // re-render to reset the input
+    return;
+  }
+  const v=parseFloat(val)||0;
+  item.plNeg=(v>0&&v!==item.pl)?v:null;
+  calcTotals();
+}
+
 function calcTotals(){
   const items=Object.values(S.selProds);
   const wrap=document.getElementById('sel-wrap');
@@ -1190,16 +1205,28 @@ function calcTotals(){
   document.getElementById('btn-export-excel').style.display='inline-flex';
 
   const desc=parseFloat(document.getElementById('ped-desc').value)||0;
-  let tab=0,totalCx=0,totalKg=0,totalM3=0;
+  const showNeg=desc===0; // coluna negociado só aparece sem desconto
+
+  // mostra/oculta cabeçalho da coluna negociado
+  const thNeg=document.getElementById('th-neg');
+  if(thNeg) thNeg.style.display=showNeg?'':'none';
+
+  // se desconto foi ativado, limpa todos os preços negociados
+  if(!showNeg) items.forEach(p=>{p.plNeg=null;});
+
+  let tab=0,tabNeg=0,totalCx=0,totalKg=0,totalM3=0;
   const tbody=document.getElementById('sel-items');
 
   tbody.innerHTML=items.map(p=>{
-    const sub=p.pl*p.qty;
+    const plEfetivo=(!showNeg||!p.plNeg)?p.pl:p.plNeg;
+    const sub=plEfetivo*p.qty;
+    const subTab=p.pl*p.qty;
     const kg=(p.kg||0)*p.qty;
     const m3=(p.m3||0)*p.qty;
-    tab+=sub; totalCx+=p.qty; totalKg+=kg; totalM3+=m3;
+    tab+=subTab; tabNeg+=sub; totalCx+=p.qty; totalKg+=kg; totalM3+=m3;
     const floor=p._minQty||0;
     const locked=floor>0;
+    const temNeg=showNeg&&p.plNeg&&p.plNeg!==p.pl;
     return`<tr style="border-top:1px solid var(--border)">
       <td style="padding:8px 12px;font-size:12px;font-weight:600;color:var(--text3)">${p.code}</td>
       <td style="padding:8px 12px;font-size:13px">
@@ -1210,8 +1237,14 @@ function calcTotals(){
         <input type="number" value="${p.qty}" min="${floor||1}" onchange="updateItemQty(${p.code},this.value)"
           style="width:62px;text-align:center;padding:4px 6px;background:var(--surface3);border:1px solid var(--border);color:var(--text);border-radius:6px;font-family:Plus Jakarta Sans,sans-serif;font-size:13px;">
       </td>
-      <td style="padding:8px 12px;text-align:right;font-size:13px">${fmt(p.pl)}</td>
-      <td style="padding:8px 12px;text-align:right;font-size:13px;font-weight:600">${fmt(sub)}</td>
+      <td style="padding:8px 12px;text-align:right;font-size:13px;color:var(--text2)${temNeg?';text-decoration:line-through':''}">${fmt(p.pl)}</td>
+      <td style="padding:8px 10px;text-align:right;display:${showNeg?'table-cell':'none'}">
+        <input type="number" value="${p.plNeg||''}" placeholder="${p.pl}" min="0" step="0.01"
+          onchange="updateItemPrice(${p.code},this.value)"
+          title="Deixe em branco para usar o preço de tabela (${fmt(p.pl)})"
+          style="width:88px;text-align:right;padding:4px 8px;background:${temNeg?'rgba(193,135,90,.1)':'var(--surface3)'};border:1px solid ${temNeg?'var(--accent)':'var(--border)'};color:${temNeg?'var(--accent)':'var(--text)'};border-radius:6px;font-family:Plus Jakarta Sans,sans-serif;font-size:13px;font-weight:${temNeg?'600':'400'}">
+      </td>
+      <td style="padding:8px 12px;text-align:right;font-size:13px;font-weight:600;color:${temNeg?'var(--accent)':'var(--text)'}">${fmt(sub)}</td>
       <td style="padding:8px 12px;text-align:right;font-size:12px;color:var(--text2)">${(kg).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       <td style="padding:8px 4px;text-align:center">
         ${locked?`<span style="color:var(--text3);font-size:12px" title="Possui caixas agendadas/entregues">🔒</span>`:`<button onclick="removeItem(${p.code})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 4px;border-radius:4px" title="Remover">✕</button>`}
@@ -1224,11 +1257,13 @@ function calcTotals(){
   document.getElementById('tot-kg').textContent=totalKg.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+' kg';
   document.getElementById('tot-m3').textContent=totalM3.toLocaleString('pt-BR',{minimumFractionDigits:3,maximumFractionDigits:3})+' m³';
 
+  // totais: sem desconto usa tabNeg (preços negociados), com desconto usa tab (tabela)
+  const base=desc>0?tab:tabNeg;
   const discVal=tab*(desc/100);
   document.getElementById('ot-tab').textContent=fmt(tab);
   document.getElementById('ot-dpct').textContent=desc;
   document.getElementById('ot-desc').textContent='- '+fmt(discVal);
-  document.getElementById('ot-final').textContent=fmt(tab-discVal);
+  document.getElementById('ot-final').textContent=fmt(desc>0?tab-discVal:tabNeg);
 }
 
 // ======================================================
@@ -1284,7 +1319,7 @@ function openModalEditPedido(id){
   S.selProds={};
   ped.items.forEach(i=>{
     const floor=Math.max(i.agendado||0,i.entregue||0);
-    S.selProds[i.code]={code:i.code,name:i.name,cat:i.cat,pl:i.pl,kg:i.kg||0,m3:i.m3||0,qty:i.qty,_minQty:floor};
+    S.selProds[i.code]={code:i.code,name:i.name,cat:i.cat,pl:i.pl,plNeg:i.plNeg||null,kg:i.kg||0,m3:i.m3||0,qty:i.qty,_minQty:floor};
   });
 
   document.getElementById('ped-edit-id').value=id;
@@ -1325,8 +1360,9 @@ function updatePedido(id){
   const data=document.getElementById('ped-data').value;
   const desc=parseFloat(document.getElementById('ped-desc').value)||0;
   const tabTotal=items.reduce((s,p)=>s+p.pl*(p.qty||1),0);
+  const negTotal=items.reduce((s,p)=>s+(p.plNeg&&desc===0?p.plNeg:p.pl)*(p.qty||1),0);
   const discVal=tabTotal*(desc/100);
-  const final=tabTotal-discVal;
+  const final=desc>0?tabTotal-discVal:negTotal;
   const totalCx=items.reduce((s,p)=>s+p.qty,0);
   const totalKg=items.reduce((s,p)=>s+(p.kg||0)*p.qty,0);
   const totalM3=items.reduce((s,p)=>s+(p.m3||0)*p.qty,0);
@@ -1340,7 +1376,7 @@ function updatePedido(id){
   ped.items=items.map(p=>{
     const existing=ped.items.find(i=>i.code===p.code);
     return{
-      code:p.code,name:p.name,cat:p.cat,pl:p.pl,kg:p.kg||0,m3:p.m3||0,
+      code:p.code,name:p.name,cat:p.cat,pl:p.pl,plNeg:p.plNeg||null,kg:p.kg||0,m3:p.m3||0,
       qty:p.qty,
       agendado:existing?existing.agendado||0:0,
       entregue:existing?existing.entregue||0:0,
@@ -1363,8 +1399,9 @@ function savePedido(){
   const desc=parseFloat(document.getElementById('ped-desc').value)||0;
   const cli=getCli(nome);
   const tabTotal=items.reduce((s,p)=>s+p.pl*(p.qty||1),0);
+  const negTotal=items.reduce((s,p)=>s+(p.plNeg&&desc===0?p.plNeg:p.pl)*(p.qty||1),0);
   const discVal=tabTotal*(desc/100);
-  const final=tabTotal-discVal;
+  const final=desc>0?tabTotal-discVal:negTotal;
   const totalCx=items.reduce((s,p)=>s+p.qty,0);
   const totalKg=items.reduce((s,p)=>s+(p.kg||0)*p.qty,0);
   const totalM3=items.reduce((s,p)=>s+(p.m3||0)*p.qty,0);
@@ -1374,7 +1411,7 @@ function savePedido(){
     cliente:nome,comprador:cli?cli.comprador:'',
     data,
     obs:document.getElementById('ped-obs').value,
-    items:items.map(p=>({code:p.code,name:p.name,cat:p.cat,pl:p.pl,kg:p.kg||0,m3:p.m3||0,qty:p.qty||1,agendado:0,entregue:0})),
+    items:items.map(p=>({code:p.code,name:p.name,cat:p.cat,pl:p.pl,plNeg:p.plNeg||null,kg:p.kg||0,m3:p.m3||0,qty:p.qty||1,agendado:0,entregue:0})),
     tabTotal,descPct:desc,discVal,final,
     totalCx,totalKg,totalM3,
     status:'pendente',
