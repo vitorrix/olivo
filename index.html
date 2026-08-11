@@ -350,7 +350,12 @@ select option{background:var(--surface2);}
 
 <!-- ===== COMISSÕES ===== -->
 <div class="page" id="page-comissoes">
-  <div class="page-header"><h2>Comissões</h2><p>Entregou em fevereiro → recebe em março</p></div>
+  <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px">
+    <div><h2>Comissões</h2><p>Entregou em fevereiro → recebe em março</p></div>
+    <button class="btn btn-ghost" onclick="recalcularComissoes()" title="Recalcula todos os valores de comissão aplicando descontos e preços negociados corretamente" style="font-size:12px;margin-top:4px">
+      🔄 Recalcular comissões
+    </button>
+  </div>
   <div class="month-nav">
     <button class="btn btn-ghost" onclick="chMonCom(-1)">← Anterior</button>
     <h3 id="com-label"></h3>
@@ -363,7 +368,7 @@ select option{background:var(--surface2);}
     <div class="card"><div class="card-label">Total a receber</div><div class="card-value" id="ck4">R$ 0,00</div></div>
   </div>
   <div class="table-wrap">
-    <table><thead><tr><th>Mês entrega</th><th>Mês recebimento</th><th>Cliente</th><th>Pedido</th><th>Vlr. entregue</th><th>%</th><th>Comissão</th><th>Status</th><th>Ação</th></tr></thead>
+    <table><thead><tr><th>Mês entrega</th><th>Data entrega</th><th>Mês recebimento</th><th>Cliente</th><th>Pedido</th><th>Vlr. entregue</th><th>%</th><th>Comissão</th><th>Status</th><th>Ação</th></tr></thead>
     <tbody id="tcom"></tbody></table>
   </div>
 </div>
@@ -1771,10 +1776,16 @@ function confirmarEntrega(agId, page='pedidos'){
   // marcar confirmado e calcular valor entregue
   ag.confirmado=true;
   ag.dataConfirmacao=new Date().toISOString().slice(0,10);
+  const descFator=1-((ped.descPct||0)/100);
   let valorEnt=0;
   (ag.itens||[]).forEach(ai=>{
     const item=ped.items.find(i=>i.code===ai.code);
-    if(item){item.entregue=(item.entregue||0)+ai.qty;valorEnt+=ai.qty*ai.pl;}
+    if(item){
+      item.entregue=(item.entregue||0)+ai.qty;
+      // usa preço negociado se houver, senão preço de tabela; aplica desconto do pedido
+      const plEfetivo=(item.plNeg&&(ped.descPct||0)===0)?item.plNeg:item.pl;
+      valorEnt+=ai.qty*plEfetivo*descFator;
+    }
   });
   ag.valorEnt=valorEnt;
 
@@ -1791,6 +1802,7 @@ function confirmarEntrega(agId, page='pedidos'){
     com.comissaoPct=cli?cli.comissao:1;
     com.valorComissao=com.valorEntregue*(com.comissaoPct/100);
     com.mesEntrega=ag.data.slice(0,7);
+    com.dataEntrega=ag.dataConfirmacao||ag.data; // data real da confirmação
     const[y,m]=ag.data.split('-').map(Number);
     const nm=m===12?1:m+1,ny=m===12?y+1:y;
     com.mesRecebimento=`${ny}-${String(nm).padStart(2,'0')}`;
@@ -2130,6 +2142,7 @@ function renderComissoes(){
     const sb=c.status==='recebido'?'<span class="badge badge-green">Recebido</span>':c.status==='parcial'?'<span class="badge badge-blue">Parcial</span>':c.status==='pendente'?'<span class="badge badge-orange">A receber</span>':'<span class="badge badge-gold">Aguard. entrega</span>';
     return`<tr style="${isM?'background:rgba(193,135,90,.04)':''}">
       <td>${em?mn(em-1)+' '+ey:'—'}</td>
+      <td style="font-size:12px;color:var(--text2)">${c.dataEntrega?fd(c.dataEntrega):'—'}</td>
       <td style="font-weight:${isM?'600':'400'};color:${isM?'var(--accent)':'var(--text)'}">${rm?mn(rm-1)+' '+ry:'—'}</td>
       <td><span class="client-dot ${dotClass(c.cliente)}"></span>${fantasia}</td>
       <td class="tm">${c.pedidoNum}</td>
@@ -2145,6 +2158,41 @@ function markRec(id){
   const c=S.comissoes.find(x=>x.id===id);
   if(c){c.status='recebido';c.dataRec=new Date().toISOString().slice(0,10);}
   save();renderComissoes();
+}
+
+// Recalcula todas as comissões existentes usando o valor efetivo (com desconto/preço negociado)
+// Chame manualmente pelo console: recalcularComissoes()
+function recalcularComissoes(){
+  let corrigidas=0;
+  S.comissoes.forEach(com=>{
+    const ped=S.pedidos.find(p=>p.id===com.pedidoId);
+    if(!ped)return;
+    const descFator=1-((ped.descPct||0)/100);
+    const cli=getCli(ped.cliente);
+    // somar valor de todas as entregas confirmadas deste pedido
+    const entregasConfirmadas=S.entregas.filter(e=>e.pedidoId===ped.id&&e.confirmado);
+    let valorEnt=0;
+    let dataEntrega=null;
+    entregasConfirmadas.forEach(ag=>{
+      (ag.itens||[]).forEach(ai=>{
+        const item=ped.items.find(i=>i.code===ai.code);
+        const plEfetivo=(item&&item.plNeg&&(ped.descPct||0)===0)?item.plNeg:(ai.pl||ai.plNeg||0);
+        valorEnt+=ai.qty*plEfetivo*descFator;
+      });
+      // usa a data de confirmação mais recente
+      const d=ag.dataConfirmacao||ag.data;
+      if(!dataEntrega||d>dataEntrega)dataEntrega=d;
+    });
+    if(Math.abs(com.valorEntregue-valorEnt)>0.01||!com.dataEntrega){
+      com.valorEntregue=valorEnt;
+      com.comissaoPct=cli?cli.comissao:com.comissaoPct;
+      com.valorComissao=valorEnt*(com.comissaoPct/100);
+      if(dataEntrega)com.dataEntrega=dataEntrega;
+      corrigidas++;
+    }
+  });
+  if(corrigidas>0){save();renderComissoes();renderDashboard();}
+  alert(`Recálculo concluído. ${corrigidas} comissão(ões) corrigida(s).`);
 }
 
 // ======================================================
