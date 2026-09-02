@@ -352,9 +352,14 @@ select option{background:var(--surface2);}
 <div class="page" id="page-comissoes">
   <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px">
     <div><h2>Comissões</h2><p>Entregou em fevereiro → recebe em março</p></div>
-    <button class="btn btn-ghost" onclick="recalcularComissoes()" title="Recalcula todos os valores de comissão aplicando descontos e preços negociados corretamente" style="font-size:12px;margin-top:4px">
-      🔄 Recalcular comissões
-    </button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-ghost" onclick="recalcularComissoes()" title="Recalcula todos os valores de comissão aplicando descontos e preços negociados corretamente" style="font-size:12px;margin-top:4px">
+        🔄 Recalcular comissões
+      </button>
+      <button class="btn btn-primary" onclick="gerarRelatorioComissoes(this)" title="Gera um PDF com as comissões a receber no mês selecionado, pronto pra enviar ao representante" style="font-size:12px;margin-top:4px">
+        📄 Relatório PDF
+      </button>
+    </div>
   </div>
   <div class="month-nav">
     <button class="btn btn-ghost" onclick="chMonCom(-1)">← Anterior</button>
@@ -2193,6 +2198,140 @@ function recalcularComissoes(){
   });
   if(corrigidas>0){save();renderComissoes();renderDashboard();}
   alert(`Recálculo concluído. ${corrigidas} comissão(ões) corrigida(s).`);
+}
+
+// ======================================================
+// RELATÓRIO DE COMISSÕES (PDF)
+// ======================================================
+let _pdfLibsReady=null;
+function loadPdfLibs(){
+  if(_pdfLibsReady)return _pdfLibsReady;
+  _pdfLibsReady=(async()=>{
+    if(!window.jspdf){
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js');
+    }
+    if(!window.jspdf.jsPDF.API.autoTable){
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/5.0.8/jspdf.plugin.autotable.min.js');
+    }
+  })();
+  return _pdfLibsReady;
+}
+
+// desenha o mesmo logo (azeitona) usado no login/menu em um canvas, pra poder
+// embutir como imagem no PDF — evita depender de um arquivo de imagem à parte
+let _logoDataUrl=null;
+function getLogoDataUrl(){
+  if(_logoDataUrl)return Promise.resolve(_logoDataUrl);
+  return new Promise((resolve,reject)=>{
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="50" fill="#16130F"/>
+      <circle cx="48" cy="60" r="23" fill="none" stroke="#F2EBDA" stroke-width="9"/>
+      <path d="M50 38 C 53 27, 60 21, 69 16" stroke="#6E7A4F" stroke-width="3.2" fill="none" stroke-linecap="round"/>
+      <ellipse cx="59" cy="23" rx="7.5" ry="3.4" fill="#6E7A4F" transform="rotate(-38 59 23)"/>
+      <ellipse cx="67" cy="17" rx="6.5" ry="3" fill="#6E7A4F" transform="rotate(-22 67 17)"/>
+      <circle cx="71" cy="20" r="4.8" fill="#C1875A"/>
+    </svg>`;
+    const img=new Image();
+    img.onload=()=>{
+      const size=240;
+      const canvas=document.createElement('canvas');
+      canvas.width=size;canvas.height=size;
+      canvas.getContext('2d').drawImage(img,0,0,size,size);
+      _logoDataUrl=canvas.toDataURL('image/png');
+      resolve(_logoDataUrl);
+    };
+    img.onerror=reject;
+    img.src='data:image/svg+xml;base64,'+btoa(svg);
+  });
+}
+
+// Gera um PDF com as comissões a receber no mês selecionado na tela de Comissões
+// (mesma seleção de mês/ano do S.comM/S.comY), pronto pra enviar ao representante.
+async function gerarRelatorioComissoes(btn){
+  const label=btn?btn.innerHTML:null;
+  if(btn){btn.disabled=true;btn.innerHTML='Gerando...';}
+  try{
+    await loadPdfLibs();
+    const logo=await getLogoDataUrl();
+
+    const ms=`${S.comY}-${String(S.comM+1).padStart(2,'0')}`;
+    const rows=S.comissoes
+      .filter(c=>c.mesRecebimento===ms&&c.status!=='recebido')
+      .sort((a,b)=>getFantasia(a.cliente).localeCompare(getFantasia(b.cliente))||(a.dataEntrega||'').localeCompare(b.dataEntrega||''));
+
+    if(!rows.length){
+      alert(`Nenhuma comissão a receber em ${mn(S.comM)} de ${S.comY}.`);
+      return;
+    }
+
+    const { jsPDF }=window.jspdf;
+    const doc=new jsPDF({unit:'mm',format:'a4'});
+    const pageW=doc.internal.pageSize.getWidth();
+    const mx=15;
+    let y=18;
+
+    // cabeçalho com logo + identidade
+    doc.addImage(logo,'PNG',mx,y-6,12,12);
+    doc.setFont('helvetica','bold');doc.setFontSize(17);doc.setTextColor(28,24,18);
+    doc.text('olivo',mx+16,y);
+    doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(92,86,72);
+    doc.text('Gestão Comercial',mx+16,y+5);
+
+    doc.setFont('helvetica','bold');doc.setFontSize(13);doc.setTextColor(193,135,90);
+    doc.text('Relatório de Comissões a Receber',pageW-mx,y-2,{align:'right'});
+    doc.setFont('helvetica','normal');doc.setFontSize(10.5);doc.setTextColor(28,24,18);
+    doc.text(`${mn(S.comM)} de ${S.comY}`,pageW-mx,y+4,{align:'right'});
+    doc.setFontSize(8);doc.setTextColor(140,130,112);
+    const agora=new Date();
+    doc.text(`Gerado em ${agora.toLocaleDateString('pt-BR')} às ${agora.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`,pageW-mx,y+9,{align:'right'});
+
+    doc.setDrawColor(221,210,184);doc.setLineWidth(0.4);
+    doc.line(mx,y+13,pageW-mx,y+13);
+
+    const totalComissao=rows.reduce((s,c)=>s+c.valorComissao,0);
+    const totalEntregue=rows.reduce((s,c)=>s+c.valorEntregue,0);
+
+    doc.autoTable({
+      startY:y+19,
+      margin:{left:mx,right:mx},
+      head:[['Cliente','Pedido','Data entrega','Mês entrega','Vlr. entregue','%','Comissão','Status']],
+      body:rows.map(c=>{
+        const[ey,em]=(c.mesEntrega||'--').split('-').map(Number);
+        return[
+          getFantasia(c.cliente),
+          c.pedidoNum||'—',
+          c.dataEntrega?fd(c.dataEntrega):'—',
+          em?`${mn(em-1)} ${ey}`:'—',
+          fmt(c.valorEntregue),
+          `${c.comissaoPct}%`,
+          fmt(c.valorComissao),
+          c.status==='parcial'?'Parcial':'A receber',
+        ];
+      }),
+      styles:{font:'helvetica',fontSize:9,textColor:[28,24,18],cellPadding:2.4,lineColor:[221,210,184],lineWidth:0.15},
+      headStyles:{fillColor:[22,19,15],textColor:[242,235,218],fontStyle:'bold',fontSize:8.5},
+      alternateRowStyles:{fillColor:[248,244,233]},
+      columnStyles:{
+        4:{halign:'right'},5:{halign:'center'},6:{halign:'right',fontStyle:'bold',textColor:[193,135,90]},7:{halign:'center'},
+      },
+      foot:[['','','','Total',fmt(totalEntregue),'',fmt(totalComissao),`${rows.length} comissão(ões)`]],
+      footStyles:{fillColor:[248,244,233],textColor:[28,24,18],fontStyle:'bold',fontSize:9,lineColor:[221,210,184],lineWidth:0.15},
+      didDrawPage:()=>{
+        const h=doc.internal.pageSize.getHeight();
+        doc.setFontSize(7.5);doc.setTextColor(140,130,112);
+        doc.text('Olivo · Gestão Comercial',mx,h-8);
+        doc.text(`Página ${doc.internal.getNumberOfPages()}`,pageW-mx,h-8,{align:'right'});
+      },
+    });
+
+    const arquivo=`Comissoes_${String(S.comM+1).padStart(2,'0')}-${S.comY}.pdf`;
+    doc.save(arquivo);
+  }catch(err){
+    console.error('Erro ao gerar relatório de comissões:',err);
+    alert('Não foi possível gerar o PDF. Tente novamente.');
+  }finally{
+    if(btn){btn.disabled=false;btn.innerHTML=label;}
+  }
 }
 
 // ======================================================
