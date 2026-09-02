@@ -2286,10 +2286,9 @@ async function gerarRelatorioComissoes(btn){
 
     const CINZA=[92,86,72],CINZA_CLARO=[140,130,112],ESCURO=[28,24,18],BEGE=[221,210,184],ACCENT=[193,135,90],CARD_BG=[248,244,233];
     const colStyles={
-      0:{cellWidth:24},1:{cellWidth:24},2:{cellWidth:28},
-      3:{cellWidth:32,halign:'right'},4:{cellWidth:14,halign:'center'},
-      5:{cellWidth:32,halign:'right',fontStyle:'bold',textColor:ACCENT},
-      6:{cellWidth:cw-24-24-28-32-14-32,halign:'center'},
+      0:{cellWidth:26,halign:'left'},1:{cellWidth:28,halign:'left'},2:{cellWidth:32,halign:'left'},
+      3:{cellWidth:40,halign:'right'},4:{cellWidth:16,halign:'center'},
+      5:{cellWidth:cw-26-28-32-40-16,halign:'right',fontStyle:'bold',textColor:ACCENT},
     };
 
     const ensureSpace=(needed)=>{ if(y+needed>pageH-24){doc.addPage();y=20;} };
@@ -2357,7 +2356,7 @@ async function gerarRelatorioComissoes(btn){
         startY:y,
         margin:{left:mx,right:mx},
         tableWidth:cw,
-        head:[['Pedido','Data entrega','Mês entrega','Vlr. entregue','%','Comissão','Status']],
+        head:[['Pedido','Data entrega','Mês entrega','Vlr. entregue','%','Comissão']],
         body:itens.map(c=>{
           const[ey,em]=(c.mesEntrega||'--').split('-').map(Number);
           return[
@@ -2367,18 +2366,16 @@ async function gerarRelatorioComissoes(btn){
             fmt(c.valorEntregue),
             `${c.comissaoPct}%`,
             fmt(c.valorComissao),
-            c.status==='parcial'?'Parcial':'A receber',
           ];
         }),
         theme:'plain',
         styles:{font:'helvetica',fontSize:9,textColor:[60,55,46],cellPadding:{top:2.6,bottom:2.6,left:2,right:2},lineColor:BEGE,lineWidth:{top:0,left:0,right:0,bottom:0.2}},
         headStyles:{textColor:CINZA,fontStyle:'bold',fontSize:7.5,lineColor:rgb,lineWidth:{top:0,left:0,right:0,bottom:0.6}},
         columnStyles:colStyles,
+        // garante que o cabeçalho use o mesmo alinhamento da coluna (columnStyles
+        // nem sempre é respeitado na linha de cabeçalho por padrão)
         didParseCell:(d)=>{
-          if(d.section==='body'&&d.column.index===6){
-            d.cell.styles.fontStyle='bold';
-            d.cell.styles.textColor=d.cell.raw==='Parcial'?[110,140,160]:[187,139,62];
-          }
+          if(d.section==='head')d.cell.styles.halign=colStyles[d.column.index]?.halign||'left';
         },
       });
 
